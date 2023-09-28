@@ -47,30 +47,6 @@ what_to_teach = "object"
 initializer_token = "face"
 pretrained_model_name_or_path = "runwayml/stable-diffusion-v1-5"
 
-
-#Downloading the dataset
-def download_image(url):
-  try:
-    response = requests.get(url)
-  except:
-    return None
-  return Image.open(BytesIO(response.content)).convert("RGB")
-
-images = list(filter(None,[download_image(url) for url in urls]))
-
-if not os.path.exists(save_path):
-  os.mkdir(save_path)
-[image.save(f"{save_path}/{i}.jpeg") for i, image in enumerate(images)]
-
-images = []
-for file_path in os.listdir(save_path):
-  try:
-      image_path = os.path.join(save_path, file_path)
-      images.append(Image.open(image_path).resize((512, 512)))
-  except:
-    print(f"{image_path} is not a valid image, please make sure to remove this file from the directory otherwise the training could fail.")
-
-
 #Setting up the prompt templates for training
 imagenet_templates_small = [
     "a face of {}",
@@ -121,7 +97,6 @@ imagenet_style_templates_small = [
     "a large painting in the style of {}",
 ]
 
-#Setting up the dataset
 class TextualInversionDataset(Dataset):
     def __init__(
         self,
@@ -163,126 +138,63 @@ class TextualInversionDataset(Dataset):
         self.templates = imagenet_style_templates_small if learnable_property == "style" else imagenet_templates_small
         self.flip_transform = transforms.RandomHorizontalFlip(p=self.flip_p)
 
-    def __len__(self):
-        return self._length
+def download_image(url):
+  try:
+    response = requests.get(url)
+  except:
+    return None
+  return Image.open(BytesIO(response.content)).convert("RGB")
 
-    def __getitem__(self, i):
-        example = {}
-        image = Image.open(self.image_paths[i % self.num_images])
+#Setting up the dataset
+def __len__(self):
+    return self._length
 
-        if not image.mode == "RGB":
-            image = image.convert("RGB")
+def __getitem__(self, i):
+    example = {}
+    image = Image.open(self.image_paths[i % self.num_images])
 
-        placeholder_string = self.placeholder_token
-        text = random.choice(self.templates).format(placeholder_string)
+    if not image.mode == "RGB":
+        image = image.convert("RGB")
 
-        example["input_ids"] = self.tokenizer(
-            text,
-            padding="max_length",
-            truncation=True,
-            max_length=self.tokenizer.model_max_length,
-            return_tensors="pt",
-        ).input_ids[0]
+    placeholder_string = self.placeholder_token
+    text = random.choice(self.templates).format(placeholder_string)
 
-        # default to score-sde preprocessing
-        img = np.array(image).astype(np.uint8)
+    example["input_ids"] = self.tokenizer(
+        text,
+        padding="max_length",
+        truncation=True,
+        max_length=self.tokenizer.model_max_length,
+        return_tensors="pt",
+    ).input_ids[0]
 
-        if self.center_crop:
-            crop = min(img.shape[0], img.shape[1])
-            h, w, = (
-                img.shape[0],
-                img.shape[1],
-            )
-            img = img[(h - crop) // 2 : (h + crop) // 2, (w - crop) // 2 : (w + crop) // 2]
+    # default to score-sde preprocessing
+    img = np.array(image).astype(np.uint8)
 
-        image = Image.fromarray(img)
-        image = image.resize((self.size, self.size), resample=self.interpolation)
+    if self.center_crop:
+        crop = min(img.shape[0], img.shape[1])
+        h, w, = (
+            img.shape[0],
+            img.shape[1],
+        )
+        img = img[(h - crop) // 2: (h + crop) // 2, (w - crop) // 2: (w + crop) // 2]
 
-        image = self.flip_transform(image)
-        image = np.array(image).astype(np.uint8)
-        image = (image / 127.5 - 1.0).astype(np.float32)
+    image = Image.fromarray(img)
+    image = image.resize((self.size, self.size), resample=self.interpolation)
 
-        example["pixel_values"] = torch.from_numpy(image).permute(2, 0, 1)
-        return example
-# Loading the tokenizer and add the placeholder token as a additional special token.
-tokenizer = CLIPTokenizer.from_pretrained(pretrained_model_name_or_path, subfolder="tokenizer")
+    image = self.flip_transform(image)
+    image = np.array(image).astype(np.uint8)
+    image = (image / 127.5 - 1.0).astype(np.float32)
 
-# Adding the placeholder token in tokenizer
-num_added_tokens = tokenizer.add_tokens(placeholder_token)
-if num_added_tokens == 0:
-    raise ValueError(f"The tokenizer already contains the token {placeholder_token}. Please pass a different "
-                     f"`placeholder_token` that is not already in the tokenizer.")
-
-token_ids = tokenizer.encode(initializer_token, add_special_tokens=False)
-# Checking if initializer_token is a single token or a sequence of tokens
-if len(token_ids) > 1:
-    raise ValueError("The initializer token must be a single token.")
-initializer_token_id = token_ids[0]
-placeholder_token_id = tokenizer.convert_tokens_to_ids(placeholder_token)
-
-# Loading the SD model
-text_encoder = CLIPTextModel.from_pretrained(
-    pretrained_model_name_or_path, subfolder="text_encoder"
-)
-vae = AutoencoderKL.from_pretrained(
-    pretrained_model_name_or_path, subfolder="vae"
-)
-unet = UNet2DConditionModel.from_pretrained(
-    pretrained_model_name_or_path, subfolder="unet"
-)
-
-#A little magic with tokens' embeds
-text_encoder.resize_token_embeddings(len(tokenizer))
-token_embeds = text_encoder.get_input_embeddings().weight.data
-token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
+    example["pixel_values"] = torch.from_numpy(image).permute(2, 0, 1)
+    return example
 
 def freeze_params(params):
     for param in params:
         param.requires_grad = False
 
-# Freeze vae and unet
-freeze_params(vae.parameters())
-freeze_params(unet.parameters())
-# Freeze all parameters except for the token embeddings in text encoder
-params_to_freeze = itertools.chain(
-    text_encoder.text_model.encoder.parameters(),
-    text_encoder.text_model.final_layer_norm.parameters(),
-    text_encoder.text_model.embeddings.position_embedding.parameters(),
-)
-freeze_params(params_to_freeze)
-
-#Creating the Dataset and Dataloader
-train_dataset = TextualInversionDataset(
-      data_root=save_path,
-      tokenizer=tokenizer,
-      size=vae.sample_size,
-      placeholder_token=placeholder_token,
-      repeats=100,
-      learnable_property=what_to_teach,
-      center_crop=False,
-      set="train",
-)
 def create_dataloader(train_batch_size=1):
     return torch.utils.data.DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
 
-#Creating noise_scheduler for training
-noise_scheduler = DDPMScheduler.from_config(pretrained_model_name_or_path, subfolder="scheduler")
-
-#Setting up all training args
-hyperparameters = {
-    "learning_rate": learning_rate,
-    "scale_lr": True,
-    "save_steps": 2000,
-    "max_train_steps":max_train_steps,
-    "train_batch_size": 2,
-    "gradient_accumulation_steps": 1,
-    "gradient_checkpointing": True,
-    "mixed_precision": "fp16",
-    "seed": 42,
-    "output_dir": save_path}
-
-#Training function
-logger = get_logger(__name__)
 def save_progress(text_encoder, placeholder_token_id, accelerator, save_path):
     logger.info("Saving embeddings")
     learned_embeds = accelerator.unwrap_model(text_encoder).get_input_embeddings().weight[placeholder_token_id]
@@ -432,6 +344,95 @@ def training_function(text_encoder, vae, unet):
         # Also save the newly trained embeddings
         save_path = path_for_result/ f"{path_for_result}.bin"
         save_progress(text_encoder, placeholder_token_id, accelerator, save_path)
+_______________
+images = list(filter(None,[download_image(url) for url in urls]))
+save_path = "./my_concept"
+if not os.path.exists(save_path):
+  os.mkdir(save_path)
+[image.save(f"{save_path}/{i}.jpeg") for i, image in enumerate(images)]
+
+images = []
+for file_path in os.listdir(save_path):
+  try:
+      image_path = os.path.join(save_path, file_path)
+      images.append(Image.open(image_path).resize((512, 512)))
+  except:
+    print(f"{image_path} is not a valid image, please make sure to remove this file from the directory otherwise the training could fail.")
+image_grid(images, 1, len(images))
+
+# Loading the tokenizer and add the placeholder token as a additional special token.
+tokenizer = CLIPTokenizer.from_pretrained(pretrained_model_name_or_path, subfolder="tokenizer")
+
+# Adding the placeholder token in tokenizer
+num_added_tokens = tokenizer.add_tokens(placeholder_token)
+if num_added_tokens == 0:
+    raise ValueError(f"The tokenizer already contains the token {placeholder_token}. Please pass a different "
+                     f"`placeholder_token` that is not already in the tokenizer.")
+
+token_ids = tokenizer.encode(initializer_token, add_special_tokens=False)
+# Checking if initializer_token is a single token or a sequence of tokens
+if len(token_ids) > 1:
+    raise ValueError("The initializer token must be a single token.")
+initializer_token_id = token_ids[0]
+placeholder_token_id = tokenizer.convert_tokens_to_ids(placeholder_token)
+
+# Loading the SD model
+text_encoder = CLIPTextModel.from_pretrained(
+    pretrained_model_name_or_path, subfolder="text_encoder"
+)
+vae = AutoencoderKL.from_pretrained(
+    pretrained_model_name_or_path, subfolder="vae"
+)
+unet = UNet2DConditionModel.from_pretrained(
+    pretrained_model_name_or_path, subfolder="unet"
+)
+
+#A little magic with tokens' embeds
+text_encoder.resize_token_embeddings(len(tokenizer))
+token_embeds = text_encoder.get_input_embeddings().weight.data
+token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
+
+# Freeze vae and unet
+freeze_params(vae.parameters())
+freeze_params(unet.parameters())
+# Freeze all parameters except for the token embeddings in text encoder
+params_to_freeze = itertools.chain(
+    text_encoder.text_model.encoder.parameters(),
+    text_encoder.text_model.final_layer_norm.parameters(),
+    text_encoder.text_model.embeddings.position_embedding.parameters(),
+)
+freeze_params(params_to_freeze)
+
+#Creating the Dataset and Dataloader
+train_dataset = TextualInversionDataset(
+      data_root=save_path,
+      tokenizer=tokenizer,
+      size=vae.sample_size,
+      placeholder_token=placeholder_token,
+      repeats=100,
+      learnable_property=what_to_teach,
+      center_crop=False,
+      set="train",
+)
+
+#Creating noise_scheduler for training
+noise_scheduler = DDPMScheduler.from_config(pretrained_model_name_or_path, subfolder="scheduler")
+
+#Setting up all training args
+hyperparameters = {
+    "learning_rate": learning_rate,
+    "scale_lr": True,
+    "save_steps": 2000,
+    "max_train_steps":max_train_steps,
+    "train_batch_size": 2,
+    "gradient_accumulation_steps": 1,
+    "gradient_checkpointing": True,
+    "mixed_precision": "fp16",
+    "seed": 42,
+    "output_dir": save_path}
+
+#Training function
+logger = get_logger(__name__)
 
 #Training!!
 accelerate.notebook_launcher(training_function, args=(text_encoder, vae, unet), num_processes=1)
