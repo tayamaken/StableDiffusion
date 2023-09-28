@@ -144,7 +144,8 @@ generated_faces = generate_face(first_face, mask, token ,2)
 
 the_best_face = 1 #пусть пока будет так
 result = merge(cv2.cvtColor(numpy.array(img), cv2.COLOR_RGB2BGR),generated_faces[the_best_face], faces_info, size_of_cropped)
-result #в колабе некоторые заморочки, насколько я понимаю, с показом изображения. не знаю, как лучше его показать, cv2.imshow(img) не работает
 
 name_s = path_for_result / 'result.png'
 result.save(str(name_s))
+
+result #в колабе некоторые заморочки, насколько я понимаю, с показом изображения

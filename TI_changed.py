@@ -29,7 +29,6 @@ from transformers import AutoProcessor, CLIPModel, CLIPTextModel, CLIPTokenizer
 
 parser = argparse.ArgumentParser()
 
-
 parser.add_argument('dataset', type=str, help='links separated by commas')
 parser.add_argument('token', type=str, help="your concept name")
 parser.add_argument('learning_rate', type=float, help="learning rate")
@@ -39,9 +38,7 @@ parser.add_argument('path_for_result', type=str, help="a path to the folder(!) w
 args = parser.parse_args()
 
 urls = args.dataset.split(',')
-
 placeholder_token = args.token
-prompt = promts_dict[args.dataset]
 learning_rate = args.learning_rate
 max_train_steps = args.max_train_steps
 path_for_result = args.path_for_result
