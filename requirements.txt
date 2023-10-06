@@ -1,0 +1,7 @@
+accelerate
+numpy
+Pillow
+requests
+tqdm
+diffusers
+transformers
