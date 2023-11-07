@@ -61,8 +61,7 @@ def generate_face(img, mask, prompt, seed, guidance_scale = 7.5, num_samples = 4
   ).images
   return images
 
-def merge(original, face, faces_info, size_of_cropped, sec_num):
-  face = resize_convert(face, size_of_cropped)  # только для первого лица
+def merge(original, face, faces_info, sec_num):
   x = faces_info[0, 0]
   y = faces_info[0, 1]
   original[y-sec_num:y-sec_num+face.shape[0], x-sec_num:x-sec_num+face.shape[1]] = face
