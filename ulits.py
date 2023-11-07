@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from io import BytesIO
 from diffusers import StableDiffusionInpaintPipeline
-from diffusers import StableDiffusionPipeline
+from diffusers import AutoPipelineForText2Image
 from transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
 
 def change_prompt(prompt, token, man):
@@ -112,7 +112,6 @@ pipe_inpaint = StableDiffusionInpaintPipeline.from_pretrained(
     "runwayml/stable-diffusion-inpainting", torch_dtype=torch.float16
 ).to("cuda")
 
-pipe_base = StableDiffusionPipeline.from_pretrained(
-    "stabilityai/stable-diffusion-2-1",
-    torch_dtype=torch.float16
+pipe_base = AutoPipelineForText2Image.from_pretrained(
+    "stabilityai/stable-diffusion-xl-base-1.0", torch_dtype=torch.float16, variant="fp16"
 ).to("cuda")
